@@ -12,7 +12,8 @@ from copy import deepcopy
 
 import numpy as np
 
-from avstack.geometry import Attitude, Pose
+from avstack.config import MODELS
+from avstack.geometry import Attitude, Pose, ReferenceFrame
 from avstack.geometry import transformations as tforms
 from avstack.utils.decorators import apply_hooks
 
@@ -47,9 +48,66 @@ class GoStraightPlanner(_PlanningAlgorithm):
     def _get_waypoint(self, ego_state):
         forward_vec = tforms.get_rot_yaw_matrix(ego_state.attitude.yaw, "+z")[:, 0]
         target_loc = ego_state.position + self.d_forward * forward_vec
-        target_point = Pose(ego_state.attitude, target_loc)
-        dist_wpt = ego_state.position.distance(target_point)
+        target_point = Pose(target_loc, ego_state.attitude)  # Pose(position, attitude)
+        dist_wpt = ego_state.position.distance(target_loc)
         return dist_wpt, Waypoint(target_point, self.target_speed)
+
+
+@MODELS.register_module()
+class ForwardCollisionPlanner(GoStraightPlanner):
+    """Drive straight, but command a full stop when a tracked object blocks the forward corridor.
+
+    A minimal modular-stack planner for closed-loop testing. It reuses ``GoStraightPlanner``'s
+    lane-free straight-ahead waypoint, but zeroes the target speed -- which makes the downstream
+    controller brake -- whenever a track lies ahead within ``brake_distance`` metres and
+    ``brake_corridor`` metres of lateral offset. This is the driving consequence that a perception
+    attack (e.g. a phantom detection) is meant to trigger.
+    """
+
+    def __init__(
+        self,
+        brake_distance=12.0,
+        brake_corridor=2.5,
+        min_forward=1.0,
+        *args,
+        **kwargs,
+    ):
+        super().__init__(*args, **kwargs)
+        self.cruise_speed = self.target_speed
+        self.brake_distance = brake_distance
+        self.brake_corridor = brake_corridor
+        self.min_forward = min_forward
+
+    @apply_hooks
+    def __call__(self, plan, ego_state, objects=None, **kwargs):
+        self.target_speed = (
+            0.0 if self._forward_hazard(ego_state, objects) else self.cruise_speed
+        )
+        plan.clear()
+        plan.push(*self._get_waypoint(ego_state))
+        return plan
+
+    def _forward_hazard(self, ego_state, objects):
+        if not objects:
+            return False
+        # ego body frame (x=forward, y=left) built from the ego's global pose; objects/tracks come
+        # in the ego_state's (global) reference, so transform them into the body frame to test the
+        # forward corridor regardless of heading.
+        ego_body = ReferenceFrame(
+            ego_state.position.x, ego_state.attitude.q, ego_state.reference
+        )
+        for obj in objects:
+            position = getattr(obj, "position", None)
+            if position is None:
+                continue
+            pos_ego = position.change_reference(ego_body, inplace=False)
+            forward, lateral = float(pos_ego.x[0]), float(pos_ego.x[1])
+            if (
+                self.min_forward <= forward <= self.brake_distance
+                and abs(lateral) <= self.brake_corridor
+            ):
+                return True
+        return False
 
 
 class RandomPlanner(_PlanningAlgorithm):

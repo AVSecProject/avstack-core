@@ -1,3 +1,4 @@
+from avstack.config import MODELS
 from avstack.geometry import Pose
 from avstack.utils.decorators import apply_hooks
 
@@ -6,6 +7,7 @@ from .pid import PIDLateralController, PIDLongitudinalController
 from .types import VehicleControlSignal
 
 
+@MODELS.register_module()
 class VehiclePIDController(BaseModule):
     def __init__(
         self,

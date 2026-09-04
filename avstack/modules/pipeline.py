@@ -26,6 +26,70 @@ class SerialPipeline(BaseModule):
 
 
 @PIPELINE.register_module()
+class ModularDrivingPipeline(BaseModule):
+    """Standard modular AV driving stack: perception -> tracking -> planning -> control.
+
+    Maps raw sensor data plus the ego vehicle state to a vehicle control command by running four
+    swappable avstack stages in series. This is the modular counterpart to end-to-end or
+    foundation-model driving stacks: each stage is an independent module built from config, so a
+    security test can attach an attack/defense as a pre/post hook on any stage (e.g. a spoofed
+    detection on ``perception``) and watch it propagate through tracking and planning into control.
+
+    Called as ``pipeline(sensor_data, ego_state)``. The closed-loop bridge (e.g. avcarla's mobile
+    actor) supplies the freshest sensor bundle and ego state each tick; when the bridge hands over a
+    ``{sensor_id: data}`` bundle, ``perception_input`` selects the sensor feeding perception (a lone
+    sensor is used automatically).
+    """
+
+    def __init__(
+        self,
+        perception: ConfigDict,
+        tracking: ConfigDict,
+        planning: ConfigDict,
+        control: ConfigDict,
+        perception_input: str = None,
+        waypoint: Dict[str, Any] = None,
+        *args: Any,
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(name="modular_driving", *args, **kwargs)
+        from .planning.types import WaypointPlan
+
+        self.perception = MODELS.build(perception)
+        self.tracking = MODELS.build(tracking)
+        self.planning = MODELS.build(planning)
+        self.control = MODELS.build(control)
+        self.perception_input = perception_input
+        self.plan = WaypointPlan(**(waypoint or {}))
+
+    def _perception_data(self, data: Any) -> Any:
+        if isinstance(data, dict):
+            if self.perception_input is not None:
+                return data[self.perception_input]
+            present = [v for v in data.values() if v is not None]
+            if len(present) == 1:
+                return present[0]
+            raise ValueError(
+                "ModularDrivingPipeline received a multi-sensor bundle "
+                f"({list(data)}); set `perception_input` to choose one."
+            )
+        return data
+
+    @apply_hooks
+    def __call__(self, data: Any, ego_state: Any, *args: Any, **kwargs: Any) -> Any:
+        detections = self.perception(self._perception_data(data))
+        self.tracking(detections, platform=ego_state.reference)
+        objects = self.tracking.tracks_confirmed
+        self.planning(self.plan, ego_state, objects)
+        return self.control(ego_state, self.plan)
+
+    def initialize(self, t0=None, ego_state=None, destination=None, map_data=None, *a, **k):
+        # the straight-drive stack needs no per-module warmup; keep the route context for planners
+        self.destination = destination
+        self.map_data = map_data
+
+
+@PIPELINE.register_module()
 class MappedPipeline(BaseModule):
     def __init__(
         self,
