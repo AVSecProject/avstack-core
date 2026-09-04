@@ -61,18 +61,25 @@ class ModularDrivingPipeline(BaseModule):
         self.control = MODELS.build(control)
         self.perception_input = perception_input
         self.plan = WaypointPlan(**(waypoint or {}))
+        self._last_data = None
 
     def _perception_data(self, data: Any) -> Any:
         if isinstance(data, dict):
             if self.perception_input is not None:
-                return data[self.perception_input]
-            present = [v for v in data.values() if v is not None]
-            if len(present) == 1:
-                return present[0]
-            raise ValueError(
-                "ModularDrivingPipeline received a multi-sensor bundle "
-                f"({list(data)}); set `perception_input` to choose one."
-            )
+                data = data.get(self.perception_input)
+            else:
+                present = [v for v in data.values() if v is not None]
+                if len(present) > 1:
+                    raise ValueError(
+                        "ModularDrivingPipeline received a multi-sensor bundle "
+                        f"({list(data)}); set `perception_input` to choose one."
+                    )
+                data = present[0] if present else None
+        # a closed-loop sensor can drop a frame (async delivery); coast on the last good cloud
+        if data is None:
+            data = self._last_data
+        else:
+            self._last_data = data
         return data
 
     @apply_hooks
