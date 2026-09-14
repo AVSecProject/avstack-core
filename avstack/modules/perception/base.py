@@ -1,14 +1,11 @@
-from typing import TYPE_CHECKING, Union
-
-
-if TYPE_CHECKING:
-    from avstack.datastructs import DataContainer
+from typing import Union
 
 
 import itertools
 import os
 
 from avstack import __file__ as avfile
+from avstack.datastructs import DataContainer
 from avstack.utils.decorators import apply_hooks
 
 from ..base import BaseModule
@@ -28,9 +25,18 @@ class _PerceptionAlgorithm(BaseModule):
         if data is None:
             return None
         else:
+            # Sensor data exposes reference; passthrough inputs retain source_reference.
+            source_reference = getattr(data, "source_reference", None)
+            if source_reference is None:
+                source_reference = getattr(data, "reference", None)
+            if source_reference is not None:
+                # Freeze the pose before inference; the live sensor/ego frame can move.
+                source_reference = source_reference.copy()
             detections = self._execute(
                 data, frame=frame, identifier=self.name, *args, **kwargs
             )
+            if isinstance(detections, DataContainer) and source_reference is not None:
+                detections.source_reference = source_reference
             return detections
 
 

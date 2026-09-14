@@ -745,6 +745,8 @@ class DataContainerEncoder(json.JSONEncoder):
             "source_identifier": o.source_identifier,
             "data": [d.encode() for d in o.data],
         }
+        if o.source_reference is not None:
+            dc_dict["source_reference"] = o.source_reference.encode()
         return {"datacontainer": dc_dict}
 
 
@@ -757,6 +759,13 @@ class DataContainerDecoder(json.JSONDecoder):
     def object_hook(self, json_object):
         if "datacontainer" in json_object:
             json_object = json_object["datacontainer"]
+            source_reference = None
+            if json_object.get("source_reference") is not None:
+                from avstack.geometry import ReferenceDecoder
+
+                source_reference = json.loads(
+                    json_object["source_reference"], cls=ReferenceDecoder
+                )
             return DataContainer(
                 frame=json_object["frame"],
                 timestamp=json_object["timestamp"],
@@ -764,6 +773,7 @@ class DataContainerDecoder(json.JSONDecoder):
                     json.loads(d, cls=self.data_decoder) for d in json_object["data"]
                 ],
                 source_identifier=json_object["source_identifier"],
+                source_reference=source_reference,
             )
         else:
             return json_object
@@ -786,15 +796,27 @@ class DataContainer:
             The collection of data (e.g., a list of detections)
         source_identifier (string):
             The identifier of the source of data
+        source_reference (optional):
+            Reference frame of the source observation, retained even when data is empty.
+            Individual elements may have been transformed into other reference frames.
     """
 
     TYPE = "DataContainer"
 
-    def __init__(self, frame: int, timestamp: float, data: Any, source_identifier: str):
+    def __init__(
+        self,
+        frame: int,
+        timestamp: float,
+        data: Any,
+        source_identifier: str,
+        *,
+        source_reference=None,
+    ):
         self.frame = int(frame)
         self.timestamp = float(timestamp)
         self.data = data
         self.source_identifier = str(source_identifier)
+        self.source_reference = source_reference
 
     def __str__(self):
         return f"{len(self.data)} elements at frame {self.frame}, time {self.timestamp}, ID: {self.source_identifier}\n{self.data}"
@@ -825,10 +847,15 @@ class DataContainer:
                 self.timestamp,
                 self.data + other.data,
                 self.source_identifier,
+                source_reference=self.source_reference,
             )
         elif isinstance(other, list):
             return DataContainer(
-                self.frame, self.timestamp, self.data + other, self.source_identifier
+                self.frame,
+                self.timestamp,
+                self.data + other,
+                self.source_identifier,
+                source_reference=self.source_reference,
             )
         else:
             raise NotImplementedError(f"Cannot add type {type(other)} to {self.TYPE}")
@@ -869,6 +896,7 @@ class DataContainer:
             timestamp=self.timestamp,
             source_identifier=self.source_identifier,
             data=[d.copy() for d in self.data],
+            source_reference=self.source_reference,
         )
 
     def encode(self):
@@ -927,6 +955,7 @@ class DataContainer:
             timestamp=self.timestamp,
             data=data,
             source_identifier=self.source_identifier,
+            source_reference=self.source_reference,
         )
 
     def filter(self, func, *args, **kwargs):
@@ -939,6 +968,7 @@ class DataContainer:
             timestamp=self.timestamp,
             data=data,
             source_identifier=self.source_identifier,
+            source_reference=self.source_reference,
         )
 
     def _check_fundamentals(self, other):
