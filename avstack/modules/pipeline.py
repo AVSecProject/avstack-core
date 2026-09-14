@@ -85,9 +85,10 @@ class ModularDrivingPipeline(BaseModule):
     @apply_hooks
     def __call__(self, data: Any, ego_state: Any, *args: Any, **kwargs: Any) -> Any:
         detections = self.perception(self._perception_data(data))
-        self.tracking(detections, platform=ego_state.reference)
-        objects = self.tracking.tracks_confirmed
-        self.planning(self.plan, ego_state, objects)
+        # Post-hooks may replace outputs without mutating the modules' internal state.
+        objects = self.tracking(detections, platform=ego_state.reference)
+        # Retain the returned plan for both control and the next planning step.
+        self.plan = self.planning(self.plan, ego_state, objects)
         return self.control(ego_state, self.plan)
 
     def initialize(self, t0=None, ego_state=None, destination=None, map_data=None, *a, **k):
