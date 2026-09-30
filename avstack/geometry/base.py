@@ -39,4 +39,4 @@ def fastround(arr, ndec, out):
     for i in range(len(arr)):
         if np.abs(arr[i]) < 1e-12:
             arr[i] = 0.0
-    return np.round_(arr, ndec, out)
+    return np.round(arr, ndec, out)  # np.round_ removed in numpy 2.0
