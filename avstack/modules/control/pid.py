@@ -37,7 +37,7 @@ class PIDBase(BaseModule):
             _de = (self._error_buffer[-1] - self._error_buffer[-2]) / (
                 self._t_buffer[-1] - self._t_buffer[-2]
             )
-            _ie = np.trapezoid(self._error_buffer, self._t_buffer)  # np.trapz deprecated in numpy 2
+            _ie = np.trapz(self._error_buffer, self._t_buffer)
         else:
             _de = 0.0
             _ie = 0.0
