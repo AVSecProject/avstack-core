@@ -19,6 +19,7 @@ def apply_hooks(func):
         args, kwargs = self._apply_pre_hooks(*args, **kwargs)
         return self._apply_post_hooks(func(self, *args, **kwargs))
 
+    _apply_hooks.__avstack_hooks__ = True
     return _apply_hooks
 
 
